@@ -1,5 +1,11 @@
-opencv-python
-face_recognition
-numpy
+numpy<2.0.0
+opencv-python<4.10.0
+opencv-contrib-python<4.10.0
 pandas
-setuptools<70
+face_recognition
+mediapipe
+customtkinter
+SpeechRecognition
+sounddevice
+pyaudio
+pickle-mixin

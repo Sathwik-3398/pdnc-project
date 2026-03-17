@@ -3,6 +3,7 @@ import face_recognition
 import pickle
 import numpy as np
 from attendance_system import mark_attendance
+from liveness_detection import LivenessDetector   # ← NEW: anti-spoofing module
 import os
 import time
 from collections import defaultdict
@@ -49,6 +50,9 @@ def draw_targeting_box(frame, top, right, bottom, left, color=(0, 255, 255), thi
     cv2.line(frame, (right, bottom), (right, bottom - corner_length), color, thickness*2)
 
 def take_attendance():
+    # ── Liveness detector (created once, reused per session) ──────────────
+    liveness = LivenessDetector()
+
     encoding_file = os.path.join("models", "encodings.pickle")
     if not os.path.exists(encoding_file):
         print("ERROR:Model Not Found")
@@ -132,21 +136,36 @@ def take_attendance():
                     consecutive_matches[name] += 1
                     
                     if consecutive_matches[name] >= REQUIRED_MATCHES:
-                        # OFFICIAL MATCH!
-                        mark_attendance(name)
-                        
-                        # --- Draw Elegant Success Screen ---
-                        overlay = frame.copy()
-                        cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 255, 0), -1)
-                        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame) # Slight green flash overlay
-                        
-                        draw_targeting_box(frame, top, right, bottom, left, color=(0, 255, 0), thickness=3, draw_solid=True)
-                        draw_hud(frame, f"ACCESS GRANTED: {name.upper()}", (0, 255, 0)) # Green HUD text
-                        
-                        cv2.imshow("Face Attendance Scanner", frame)
-                        cv2.waitKey(2000) # Freeze the frame for 2 seconds to show user
-                        
-                        print(f"SUCCESS:{name}")
+                        # ── FACE MATCHED → Run liveness / blink check first ──────────
+                        try:
+                            liveness_status = liveness.run_blink_check(
+                                cap,
+                                draw_hud_fn   = draw_hud,
+                                draw_box_fn   = draw_targeting_box,
+                                face_top      = top,
+                                face_right    = right,
+                                face_bottom   = bottom,
+                                face_left     = left,
+                                recognized_name = name,
+                            )
+                        except Exception as e:
+                            import sys
+                            print(f"[LIVENESS CRITICAL] {e}", file=sys.stderr)
+                            liveness_status = "ERROR"
+
+                        if liveness_status == "LIVE":
+                            # ── Both eye + voice verified → mark attendance ─────────────
+                            mark_attendance(name)
+                            print(f"SUCCESS:{name}")
+
+                        elif liveness_status == "VOICE_FAIL":
+                            # ── Blink ok but voice not heard ──────────────────────
+                            print("VOICE_FAIL:Did not say Present Sir")
+
+                        else:
+                            # ── SPOOF or ERROR → no attendance ───────────────────
+                            print("SPOOF:Blink not detected")
+
                         cap.release()
                         cv2.destroyAllWindows()
                         return
